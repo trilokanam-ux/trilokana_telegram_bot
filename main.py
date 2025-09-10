@@ -13,10 +13,14 @@ from datetime import datetime
 # --------------------- CONFIG ---------------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-SPREADSHEET_NAME = os.environ.get("SPREADSHEET_NAME", "Trilokana Marketing Bot Data")
-GOOGLE_CREDENTIALS_JSON = "credentials.json"
 
-# --------------------------------------------------
+# Spreadsheet ID from your Google Sheet URL
+SPREADSHEET_ID = os.environ.get(
+    "SPREADSHEET_ID",
+    "1iWppZyyrRdV_j_JxUJqC9kFNnYDpBzZPF-56BR1-wYQ"  # fallback if not in env
+)
+
+GOOGLE_CREDENTIALS_JSON = "credentials.json"
 
 # --------------------- LOGGING ---------------------
 logging.basicConfig(
@@ -29,7 +33,9 @@ logger = logging.getLogger(__name__)
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_CREDENTIALS_JSON, scope)
 client = gspread.authorize(creds)
-sheet = client.open(SPREADSHEET_NAME).sheet1
+
+# Always open by Spreadsheet ID (safe and reliable)
+sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
 # --------------------- FASTAPI ---------------------
 app = FastAPI()
