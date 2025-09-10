@@ -1,14 +1,16 @@
 from dotenv import load_dotenv
 load_dotenv()
 import os
+import json
+import logging
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
-import logging
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
+from contextlib import asynccontextmanager
 
 # --------------------- CONFIG ---------------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -20,8 +22,6 @@ SPREADSHEET_ID = os.environ.get(
     "1iWppZyyrRdV_j_JxUJqC9kFNnYDpBzZPF-56BR1-wYQ"  # fallback if not in env
 )
 
-GOOGLE_CREDENTIALS_JSON = "credentials.json"
-
 # --------------------- LOGGING ---------------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -31,14 +31,13 @@ logger = logging.getLogger(__name__)
 
 # --------------------- GOOGLE SHEETS ---------------------
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_CREDENTIALS_JSON, scope)
+
+# Load credentials from environment variable
+credentials_dict = json.loads(os.getenv("GOOGLE_CREDENTIALS_JSON"))
+creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
+
 client = gspread.authorize(creds)
-
-# Always open by Spreadsheet ID (safe and reliable)
 sheet = client.open_by_key(SPREADSHEET_ID).sheet1
-
-# --------------------- FASTAPI ---------------------
-app = FastAPI()
 
 # --------------------- TELEGRAM ---------------------
 application = Application.builder().token(BOT_TOKEN).build()
@@ -105,6 +104,8 @@ class TelegramUpdate(BaseModel):
     update_id: int
     message: dict = None
 
+app = FastAPI()
+
 @app.post("/webhook")
 async def telegram_webhook(update: TelegramUpdate, request: Request):
     update_dict = update.dict()
@@ -117,13 +118,17 @@ async def telegram_webhook(update: TelegramUpdate, request: Request):
 async def root():
     return {"message": "Trilokana Telegram Bot is running!"}
 
-# --------------------- STARTUP & SHUTDOWN ---------------------
-@app.on_event("startup")
-async def startup():
+# --------------------- LIFESPAN EVENTS ---------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
     await application.initialize()
     await application.bot.set_webhook(WEBHOOK_URL)
     logger.info(f"Webhook set to {WEBHOOK_URL}")
 
-@app.on_event("shutdown")
-async def shutdown():
+    yield  # Application runs here
+
+    # Shutdown
     await application.shutdown()
+
+app = FastAPI(lifespan=lifespan)
