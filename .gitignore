@@ -1,5 +1,23 @@
+# Virtual environment
 venv/
+.env
+
+# Credentials
 credentials.json
+
+# Python cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
+# Logs
+*.log
+
+# IDE / Editor settings
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

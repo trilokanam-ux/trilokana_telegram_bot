@@ -10,11 +10,17 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
+from contextlib import asynccontextmanager
 
 # --------------------- CONFIG ---------------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-SPREADSHEET_NAME = os.environ.get("SPREADSHEET_NAME", "Trilokana_Marketing_Bot_Data")
+
+# Spreadsheet ID from your Google Sheet URL
+SPREADSHEET_ID = os.environ.get(
+    "SPREADSHEET_ID",
+    "1iWppZyyrRdV_j_JxUJqC9kFNnYDpBzZPF-56BR1-wYQ"  # fallback if not in env
+)
 
 # --------------------- LOGGING ---------------------
 logging.basicConfig(
@@ -24,20 +30,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --------------------- GOOGLE SHEETS ---------------------
-creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-if not creds_json:
-    raise ValueError("Environment variable GOOGLE_CREDENTIALS_JSON not set")
-
-# Convert JSON string from env into dictionary
-creds_dict = json.loads(creds_json)
-
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-client = gspread.authorize(creds)
-sheet = client.open(SPREADSHEET_NAME).sheet1
 
-# --------------------- FASTAPI ---------------------
-app = FastAPI()
+# Load credentials from environment variable
+credentials_dict = json.loads(os.getenv("GOOGLE_CREDENTIALS_JSON"))
+creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
+
+client = gspread.authorize(creds)
+sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
 # --------------------- TELEGRAM ---------------------
 application = Application.builder().token(BOT_TOKEN).build()
@@ -104,6 +104,8 @@ class TelegramUpdate(BaseModel):
     update_id: int
     message: dict = None
 
+app = FastAPI()
+
 @app.post("/webhook")
 async def telegram_webhook(update: TelegramUpdate, request: Request):
     update_dict = update.dict()
@@ -116,23 +118,17 @@ async def telegram_webhook(update: TelegramUpdate, request: Request):
 async def root():
     return {"message": "Trilokana Telegram Bot is running!"}
 
-# --------------------- STARTUP & SHUTDOWN ---------------------
-@app.on_event("startup")
-async def startup():
+# --------------------- LIFESPAN EVENTS ---------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
     await application.initialize()
     await application.bot.set_webhook(WEBHOOK_URL)
     logger.info(f"Webhook set to {WEBHOOK_URL}")
 
-@app.on_event("shutdown")
-async def shutdown():
+    yield  # Application runs here
+
+    # Shutdown
     await application.shutdown()
 
-import os
-import uvicorn
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))  # Railway assigns this automatically
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
-
-
-
+app = FastAPI(lifespan=lifespan)
