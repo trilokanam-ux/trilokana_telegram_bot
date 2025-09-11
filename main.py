@@ -1,9 +1,10 @@
 from dotenv import load_dotenv
 load_dotenv()
 import os
+import json
+import logging
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
-import logging
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 import gspread
@@ -13,10 +14,7 @@ from datetime import datetime
 # --------------------- CONFIG ---------------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-SPREADSHEET_NAME = os.environ.get("SPREADSHEET_NAME", "Trilokana Marketing Bot Data")
-GOOGLE_CREDENTIALS_JSON = "credentials.json"
-
-# --------------------------------------------------
+SPREADSHEET_NAME = os.environ.get("SPREADSHEET_NAME", "Trilokana_Marketing_Bot_Data")
 
 # --------------------- LOGGING ---------------------
 logging.basicConfig(
@@ -26,8 +24,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --------------------- GOOGLE SHEETS ---------------------
+creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+if not creds_json:
+    raise ValueError("Environment variable GOOGLE_CREDENTIALS_JSON not set")
+
+# Convert JSON string from env into dictionary
+creds_dict = json.loads(creds_json)
+
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_CREDENTIALS_JSON, scope)
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open(SPREADSHEET_NAME).sheet1
 
