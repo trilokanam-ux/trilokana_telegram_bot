@@ -98,7 +98,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     selected_option = query.data
 
-    # Always acknowledge first
+    # ✅ Immediately answer callback to remove spinner
     await query.answer()
 
     # ----- Confirmation flow -----
@@ -116,21 +116,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
             try:
                 sheet.append_row(row)
-                await query.message.reply_text(
-                    "Thank you! Your details have been recorded. We will contact you soon."
-                )
-                await query.message.reply_text("Contact us via WhatsApp: https://wa.me/7760225959")
             except Exception as e:
                 logger.exception("Error appending to Google Sheet: %s", e)
-                await query.message.reply_text("Sorry, there was an error saving your data. Please try again later.")
+
+        # Clear user data and remove inline keyboard first
         user_data.pop(user_id, None)
-        await query.message.edit_reply_markup(None)
+        try:
+            await query.message.edit_reply_markup(None)
+        except Exception:
+            pass
+
+        # Send messages asynchronously after removing keyboard
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Thank you! Your details have been recorded. We will contact you soon.")
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Contact us via WhatsApp: https://wa.me/7760225959")
         return
 
     elif selected_option == "No":
+        # Clear user data and restart
         user_data.pop(user_id, None)
-        await query.message.reply_text("Let's start over. Use /start to select a service again.")
-        await query.message.edit_reply_markup(None)
+        try:
+            await query.message.edit_reply_markup(None)
+        except Exception:
+            pass
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Let's start over. Use /start to select a service again.")
         return
 
     # ----- Normal option selection -----
@@ -142,12 +153,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Phone": "",
         "Query": ""
     }
+
     try:
         await query.message.edit_reply_markup(None)
     except Exception:
         pass
 
-    await query.message.reply_text(f"You selected: {selected_option}\nEnter your Name:")
+    await context.bot.send_message(chat_id=query.message.chat_id,
+                                   text=f"You selected: {selected_option}\nEnter your Name:")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -188,7 +201,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif step == 5:
         user_data[user_id]["Query"] = text
 
-        # Show summary for confirmation
+        # ✅ Show summary for confirmation before submission
         data = user_data[user_id]
         summary_text = (
             f"Please confirm your details:\n\n"
