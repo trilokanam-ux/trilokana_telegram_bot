@@ -1,4 +1,3 @@
-# main.py
 from dotenv import load_dotenv
 load_dotenv()
 import os
@@ -59,7 +58,7 @@ application = Application.builder().token(BOT_TOKEN).build()
 user_data = {}
 KNOWN_OPTIONS = ["Digital Marketing Strategy", "Paid Marketing", "SEO", "Creatives"]
 
-# --------------------- VALIDATION ---------------------
+# --------------------- VALIDATION FUNCTIONS ---------------------
 def is_valid_email(email: str) -> bool:
     pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
     return re.match(pattern, email) is not None
@@ -67,10 +66,9 @@ def is_valid_email(email: str) -> bool:
 def is_valid_phone(phone: str) -> bool:
     return phone.isdigit() and len(phone) >= 10
 
-# --------------------- HELPER ---------------------
 def reset_user(user_id):
     if user_id in user_data:
-        user_data.pop(user_id)
+        del user_data[user_id]
 
 def save_to_sheet(data):
     try:
@@ -83,6 +81,7 @@ def save_to_sheet(data):
 
 # --------------------- HANDLERS ---------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"User {update.effective_user.id} started the bot")
     keyboard = [
         [
             InlineKeyboardButton("Digital Marketing Strategy", callback_data="option_Digital Marketing Strategy"),
@@ -101,40 +100,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     if update.message:
         await update.message.reply_text(welcome_text, reply_markup=reply_markup)
-    elif update.effective_chat:
+    else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=welcome_text, reply_markup=reply_markup)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
         return
-    await query.answer()  # remove spinner
+    await query.answer()
     user_id = query.from_user.id
     data = query.data
-    logger.info(f"Callback received from user {user_id}: {data}")
+    logger.info(f"User {user_id} clicked button: {data}")
 
-    # ---------------- Handle initial option selection ----------------
+    # ---------------- Option Selection ----------------
     if data.startswith("option_"):
         selected_option = data.replace("option_", "")
         user_data[user_id] = {"step": 2, "Option": selected_option, "Name": "", "Email": "", "Phone": "", "Query": ""}
-        await context.bot.send_message(chat_id=query.message.chat.id,
-                                       text=f"You selected: {selected_option}\nEnter your Name:")
+        await query.message.reply_text(f"You selected: {selected_option}\nEnter your Name:")
+        try:
+            await query.message.edit_reply_markup(None)
+        except Exception:
+            pass
         return
 
-    # ---------------- Handle Yes/No confirmation ----------------
+    # ---------------- Confirmation ----------------
     if data == "Yes":
-        user_info = user_data.get(user_id)
-        if user_info:
-            save_to_sheet(user_info)
+        if user_id in user_data:
+            save_to_sheet(user_data[user_id])
         reset_user(user_id)
-        await context.bot.send_message(chat_id=query.message.chat.id,
-                                       text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
-        await context.bot.send_message(chat_id=query.message.chat.id,
-                                       text="Contact us via WhatsApp: https://wa.me/7760225959")
+        await query.message.reply_text("✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
+        await query.message.reply_text("Contact us via WhatsApp: https://wa.me/7760225959")
+        return
     elif data == "No":
         reset_user(user_id)
-        await context.bot.send_message(chat_id=query.message.chat.id,
-                                       text="Let's start over. Use /start to select a service again.")
+        await query.message.reply_text("Let's start over. Use /start to select a service again.")
+        return
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -142,26 +142,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_id = message.from_user.id
     text = message.text.strip()
+    logger.info(f"User {user_id} sent message: {text}")
 
     if user_id not in user_data:
         await message.reply_text("Please select a service first using /start")
         return
 
-    step = user_data[user_id]["step"]
+    step = user_data[user_id].get("step", 2)
+
     if step == 2:
         user_data[user_id]["Name"] = text
         user_data[user_id]["step"] = 3
         await message.reply_text("Enter your Email:")
     elif step == 3:
         if not is_valid_email(text):
-            await message.reply_text("Invalid email! Enter a valid email address:")
+            await message.reply_text("Invalid email! Please enter a valid email address:")
             return
         user_data[user_id]["Email"] = text
         user_data[user_id]["step"] = 4
         await message.reply_text("Enter your Phone Number:")
     elif step == 4:
         if not is_valid_phone(text):
-            await message.reply_text("Invalid phone number! Enter digits only (min 10 digits):")
+            await message.reply_text("Invalid phone number! Please enter a valid phone number (digits only, min 10 digits):")
             return
         user_data[user_id]["Phone"] = text
         user_data[user_id]["step"] = 5
@@ -180,7 +182,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("Yes", callback_data="Yes"),
                      InlineKeyboardButton("No", callback_data="No")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(chat_id=message.chat.id, text=summary_text, reply_markup=reply_markup)
+        await message.reply_text(summary_text, reply_markup=reply_markup)
+        user_data[user_id]["step"] = 6  # awaiting confirmation
 
 # --------------------- REGISTER HANDLERS ---------------------
 application.add_handler(CommandHandler("start", start))
