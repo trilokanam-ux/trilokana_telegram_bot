@@ -5,6 +5,7 @@ import os
 import json
 import logging
 import re
+import asyncio
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -67,6 +68,16 @@ def is_valid_email(email: str) -> bool:
 def is_valid_phone(phone: str) -> bool:
     return phone.isdigit() and len(phone) >= 10
 
+# --------------------- HELPER ---------------------
+async def save_to_sheet(data):
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        row = [timestamp, data["Option"], data["Name"], data["Email"], data["Phone"], data["Query"]]
+        sheet.append_row(row)
+        logger.info("Data saved to Google Sheet successfully")
+    except Exception as e:
+        logger.exception("Error saving to Google Sheet: %s", e)
+
 # --------------------- HANDLERS ---------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -98,9 +109,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     selected_option = query.data
 
     # ✅ Immediately answer callback to remove spinner
-    await query.answer()
+    await query.answer(text="Processing...", show_alert=False)
 
-    # Clear keyboard first
+    # Clear keyboard
     try:
         await query.message.edit_reply_markup(None)
     except Exception:
@@ -110,19 +121,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if selected_option == "Yes":
         data = user_data.get(user_id)
         if data:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            row = [timestamp, data["Option"], data["Name"], data["Email"], data["Phone"], data["Query"]]
-            try:
-                sheet.append_row(row)
-            except Exception as e:
-                logger.exception("Error appending to Google Sheet: %s", e)
+            # Save to Google Sheets asynchronously
+            asyncio.create_task(save_to_sheet(data))
         user_data.pop(user_id, None)
         await context.bot.send_message(chat_id=query.message.chat_id,
                                        text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
         await context.bot.send_message(chat_id=query.message.chat_id,
                                        text="Contact us via WhatsApp: https://wa.me/7760225959")
         return
-
     elif selected_option == "No":
         user_data.pop(user_id, None)
         await context.bot.send_message(chat_id=query.message.chat_id,
