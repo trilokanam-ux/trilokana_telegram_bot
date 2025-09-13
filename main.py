@@ -33,9 +33,9 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 SPREADSHEET_NAME = os.environ.get("SPREADSHEET_NAME", "Trilokana_Marketing_Bot_Data")
 
-logging.info(f"BOT_TOKEN set? {BOT_TOKEN is not None}")
-logging.info(f"WEBHOOK_URL set? {WEBHOOK_URL is not None}")
-logging.info(f"SPREADSHEET_NAME: {SPREADSHEET_NAME}")
+logger.info(f"BOT_TOKEN set? {BOT_TOKEN is not None}")
+logger.info(f"WEBHOOK_URL set? {WEBHOOK_URL is not None}")
+logger.info(f"SPREADSHEET_NAME: {SPREADSHEET_NAME}")
 
 # --------------------- GOOGLE SHEETS ---------------------
 creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
@@ -71,6 +71,7 @@ def is_valid_phone(phone: str) -> bool:
 def reset_user(user_id):
     if user_id in user_data:
         user_data.pop(user_id)
+        logger.info(f"Reset data for user {user_id}")
 
 def save_to_sheet(data):
     try:
@@ -111,11 +112,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = query.from_user.id
     data = query.data
+    logger.info(f"User {user_id} pressed button: {data}")
 
-    # Remove spinner
-    await query.answer()
+    await query.answer()  # remove spinner
 
-    # Clear keyboard
     try:
         await query.message.edit_reply_markup(None)
     except Exception:
@@ -158,6 +158,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     step = user_data[user_id]["step"]
+    logger.info(f"User {user_id} at step {step}, message: {text}")
+
     if step == 2:
         user_data[user_id]["Name"] = text
         user_data[user_id]["step"] = 3
