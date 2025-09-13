@@ -94,37 +94,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
         return
-
     user_id = query.from_user.id
     selected_option = query.data
 
     # ✅ Immediately answer callback to remove spinner
     await query.answer()
 
-    # ----- Confirmation flow -----
+    # Clear keyboard first
+    try:
+        await query.message.edit_reply_markup(None)
+    except Exception:
+        pass
+
+    # ----- Confirmation -----
     if selected_option == "Yes":
         data = user_data.get(user_id)
         if data:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            row = [
-                timestamp,
-                data["Option"],
-                data["Name"],
-                data["Email"],
-                data["Phone"],
-                data["Query"],
-            ]
+            row = [timestamp, data["Option"], data["Name"], data["Email"], data["Phone"], data["Query"]]
             try:
                 sheet.append_row(row)
             except Exception as e:
                 logger.exception("Error appending to Google Sheet: %s", e)
-
         user_data.pop(user_id, None)
-        try:
-            await query.message.edit_reply_markup(None)
-        except Exception:
-            pass
-
         await context.bot.send_message(chat_id=query.message.chat_id,
                                        text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
         await context.bot.send_message(chat_id=query.message.chat_id,
@@ -133,29 +125,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif selected_option == "No":
         user_data.pop(user_id, None)
-        try:
-            await query.message.edit_reply_markup(None)
-        except Exception:
-            pass
         await context.bot.send_message(chat_id=query.message.chat_id,
                                        text="Let's start over. Use /start to select a service again.")
         return
 
     # ----- Normal option selection -----
-    user_data[user_id] = {
-        "step": 2,
-        "Option": selected_option,
-        "Name": "",
-        "Email": "",
-        "Phone": "",
-        "Query": ""
-    }
-
-    try:
-        await query.message.edit_reply_markup(None)
-    except Exception:
-        pass
-
+    user_data[user_id] = {"step": 2, "Option": selected_option, "Name": "", "Email": "", "Phone": "", "Query": ""}
     await context.bot.send_message(chat_id=query.message.chat_id,
                                    text=f"You selected: {selected_option}\nEnter your Name:")
 
@@ -176,7 +151,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     step = user_data[user_id].get("step", 2)
-
     if step == 2:
         user_data[user_id]["Name"] = text
         user_data[user_id]["step"] = 3
@@ -197,8 +171,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text("Enter your Query:")
     elif step == 5:
         user_data[user_id]["Query"] = text
-
-        # ✅ Show summary for confirmation
         data = user_data[user_id]
         summary_text = (
             f"Please confirm your details:\n\n"
@@ -208,9 +180,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Phone: {data['Phone']}\n"
             f"Query: {data['Query']}\n"
         )
-        keyboard = [
-            [InlineKeyboardButton("Yes", callback_data="Yes"), InlineKeyboardButton("No", callback_data="No")]
-        ]
+        keyboard = [[InlineKeyboardButton("Yes", callback_data="Yes"),
+                     InlineKeyboardButton("No", callback_data="No")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await message.reply_text(summary_text, reply_markup=reply_markup)
 
