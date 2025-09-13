@@ -119,22 +119,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.exception("Error appending to Google Sheet: %s", e)
 
-        # Clear user data and remove inline keyboard first
         user_data.pop(user_id, None)
         try:
             await query.message.edit_reply_markup(None)
         except Exception:
             pass
 
-        # Send messages asynchronously after removing keyboard
         await context.bot.send_message(chat_id=query.message.chat_id,
-                                       text="Thank you! Your details have been recorded. We will contact you soon.")
+                                       text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
         await context.bot.send_message(chat_id=query.message.chat_id,
                                        text="Contact us via WhatsApp: https://wa.me/7760225959")
         return
 
     elif selected_option == "No":
-        # Clear user data and restart
         user_data.pop(user_id, None)
         try:
             await query.message.edit_reply_markup(None)
@@ -201,7 +198,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif step == 5:
         user_data[user_id]["Query"] = text
 
-        # ✅ Show summary for confirmation before submission
+        # ✅ Show summary for confirmation
         data = user_data[user_id]
         summary_text = (
             f"Please confirm your details:\n\n"
