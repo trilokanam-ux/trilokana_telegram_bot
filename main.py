@@ -61,6 +61,7 @@ def is_valid_phone(phone: str) -> bool:
 
 # ---------------- HELPERS ----------------
 def reset_user(user_id):
+    logger.info(f"Resetting user {user_id}")
     user_data.pop(user_id, None)
 
 def save_to_sheet(data):
@@ -70,12 +71,13 @@ def save_to_sheet(data):
             data["Option"], data["Name"], data["Email"], data["Phone"], data["Query"]
         ]
         sheet.append_row(row)
-        logger.info("Saved to Google Sheet")
+        logger.info(f"Saved to Google Sheet: {row}")
     except Exception as e:
         logger.exception("Error saving to Google Sheet: %s", e)
 
 # ---------------- HANDLERS ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"User {update.effective_user.id} started the bot")
     keyboard = [
         [
             InlineKeyboardButton("Digital Marketing Strategy", callback_data="Digital Marketing Strategy"),
@@ -99,10 +101,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     user_id = query.from_user.id
     data = query.data
+    logger.info(f"Callback received from user {user_id}: {data}")
 
     # Handle option selection
     if data in KNOWN_OPTIONS:
         user_data[user_id] = {"step": 2, "Option": data, "Name": "", "Email": "", "Phone": "", "Query": ""}
+        logger.info(f"User {user_id} selected option {data}")
         try: await query.message.edit_reply_markup(None)
         except: pass
         await query.message.reply_text(f"You selected: {data}\nEnter your Name:")
@@ -110,11 +114,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Handle confirmation Yes / No
     if data == "Yes":
+        logger.info(f"User {user_id} confirmed details")
         save_to_sheet(user_data.get(user_id, {}))
         reset_user(user_id)
         await query.message.reply_text("✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
         await query.message.reply_text("Contact us via WhatsApp: https://wa.me/7760225959")
     elif data == "No":
+        logger.info(f"User {user_id} rejected details, restarting")
         reset_user(user_id)
         await query.message.reply_text("Let's start over. Use /start to select a service again.")
 
@@ -123,17 +129,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg or not msg.text: return
     user_id = msg.from_user.id
     text = msg.text.strip()
+    logger.info(f"Message from {user_id}: {text}")
 
     # Initialize if user types option directly
     if user_id not in user_data:
         if text in KNOWN_OPTIONS:
             user_data[user_id] = {"step": 2, "Option": text, "Name": "", "Email": "", "Phone": "", "Query": ""}
+            logger.info(f"User {user_id} started flow with option {text}")
             await msg.reply_text("Enter your Name:")
         else:
             await msg.reply_text("Please choose a service using /start or type one of: " + ", ".join(KNOWN_OPTIONS))
         return
 
     step = user_data[user_id]["step"]
+    logger.info(f"User {user_id} is at step {step}")
+    
     if step == 2:
         user_data[user_id]["Name"] = text
         user_data[user_id]["step"] = 3
@@ -163,6 +173,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Phone: {data['Phone']}\n"
             f"Query: {data['Query']}\n"
         )
+        logger.info(f"Sending confirmation to user {user_id}")
         keyboard = [[
             InlineKeyboardButton("Yes", callback_data="Yes"),
             InlineKeyboardButton("No", callback_data="No")
@@ -183,6 +194,7 @@ class TelegramUpdate(BaseModel):
 @app.post("/webhook")
 async def telegram_webhook(update: TelegramUpdate):
     telegram_update = Update.de_json(update.dict(), application.bot)
+    logger.info(f"Incoming update: {update.update_id}")
     await application.process_update(telegram_update)
     return {"ok": True}
 
@@ -193,12 +205,17 @@ async def root():
 # ---------------- STARTUP / SHUTDOWN ----------------
 @app.on_event("startup")
 async def startup():
+    logger.info("Initializing Telegram application...")
     await application.initialize()
     if WEBHOOK_URL:
         await application.bot.set_webhook(WEBHOOK_URL)
+        logger.info(f"Webhook set to {WEBHOOK_URL}")
+    else:
+        logger.warning("WEBHOOK_URL not set.")
 
 @app.on_event("shutdown")
 async def shutdown():
+    logger.info("Shutting down Telegram application...")
     await application.shutdown()
 
 # ---------------- RUN ----------------
