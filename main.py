@@ -59,7 +59,7 @@ application = Application.builder().token(BOT_TOKEN).build()
 user_data = {}
 KNOWN_OPTIONS = ["Digital Marketing Strategy", "Paid Marketing", "SEO", "Creatives"]
 
-# --------------------- VALIDATION FUNCTIONS ---------------------
+# --------------------- VALIDATION ---------------------
 def is_valid_email(email: str) -> bool:
     pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
     return re.match(pattern, email) is not None
@@ -94,11 +94,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
         return
-    await query.answer()
+
     user_id = query.from_user.id
     selected_option = query.data
 
-    # If this is a confirmation step
+    # Always acknowledge first
+    await query.answer()
+
+    # ----- Confirmation flow -----
     if selected_option == "Yes":
         data = user_data.get(user_id)
         if data:
@@ -113,30 +116,37 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
             try:
                 sheet.append_row(row)
-                await query.message.reply_text("Thank you! Your details have been recorded. We will contact you soon.")
+                await query.message.reply_text(
+                    "Thank you! Your details have been recorded. We will contact you soon."
+                )
                 await query.message.reply_text("Contact us via WhatsApp: https://wa.me/7760225959")
             except Exception as e:
                 logger.exception("Error appending to Google Sheet: %s", e)
                 await query.message.reply_text("Sorry, there was an error saving your data. Please try again later.")
-        if user_id in user_data:
-            del user_data[user_id]
+        user_data.pop(user_id, None)
         await query.message.edit_reply_markup(None)
         return
 
     elif selected_option == "No":
-        # Restart the flow
-        if user_id in user_data:
-            del user_data[user_id]
+        user_data.pop(user_id, None)
         await query.message.reply_text("Let's start over. Use /start to select a service again.")
         await query.message.edit_reply_markup(None)
         return
 
-    # Normal option selection
-    user_data[user_id] = {"step": 2, "Option": selected_option, "Name": "", "Email": "", "Phone": "", "Query": ""}
+    # ----- Normal option selection -----
+    user_data[user_id] = {
+        "step": 2,
+        "Option": selected_option,
+        "Name": "",
+        "Email": "",
+        "Phone": "",
+        "Query": ""
+    }
     try:
-        await query.message.edit_reply_markup(reply_markup=None)
+        await query.message.edit_reply_markup(None)
     except Exception:
         pass
+
     await query.message.reply_text(f"You selected: {selected_option}\nEnter your Name:")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
