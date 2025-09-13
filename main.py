@@ -1,3 +1,4 @@
+# main.py
 from dotenv import load_dotenv
 load_dotenv()
 import os
@@ -66,6 +67,7 @@ def is_valid_email(email: str) -> bool:
 def is_valid_phone(phone: str) -> bool:
     return phone.isdigit() and len(phone) >= 10
 
+# --------------------- HELPERS ---------------------
 def reset_user(user_id):
     if user_id in user_data:
         del user_data[user_id]
@@ -81,15 +83,14 @@ def save_to_sheet(data):
 
 # --------------------- HANDLERS ---------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"User {update.effective_user.id} started the bot")
     keyboard = [
         [
-            InlineKeyboardButton("Digital Marketing Strategy", callback_data="option_Digital Marketing Strategy"),
-            InlineKeyboardButton("Paid Marketing", callback_data="option_Paid Marketing"),
+            InlineKeyboardButton("Digital Marketing Strategy", callback_data="Digital Marketing Strategy"),
+            InlineKeyboardButton("Paid Marketing", callback_data="Paid Marketing"),
         ],
         [
-            InlineKeyboardButton("SEO", callback_data="option_SEO"),
-            InlineKeyboardButton("Creatives", callback_data="option_Creatives"),
+            InlineKeyboardButton("SEO", callback_data="SEO"),
+            InlineKeyboardButton("Creatives", callback_data="Creatives"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -100,40 +101,37 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     if update.message:
         await update.message.reply_text(welcome_text, reply_markup=reply_markup)
-    else:
+    elif update.effective_chat:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=welcome_text, reply_markup=reply_markup)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
         return
-    await query.answer()
     user_id = query.from_user.id
-    data = query.data
-    logger.info(f"User {user_id} clicked button: {data}")
+    await query.answer()  # remove spinner
 
-    # ---------------- Option Selection ----------------
-    if data.startswith("option_"):
-        selected_option = data.replace("option_", "")
-        user_data[user_id] = {"step": 2, "Option": selected_option, "Name": "", "Email": "", "Phone": "", "Query": ""}
-        await query.message.reply_text(f"You selected: {selected_option}\nEnter your Name:")
+    # ---------------- Handle service option ----------------
+    if query.data in KNOWN_OPTIONS:
+        user_data[user_id] = {"step": 2, "Option": query.data, "Name": "", "Email": "", "Phone": "", "Query": ""}
         try:
             await query.message.edit_reply_markup(None)
         except Exception:
             pass
+        await context.bot.send_message(chat_id=query.message.chat.id, text=f"You selected: {query.data}\nEnter your Name:")
         return
 
-    # ---------------- Confirmation ----------------
-    if data == "Yes":
+    # ---------------- Handle confirmation Yes/No ----------------
+    if query.data == "Yes":
         if user_id in user_data:
             save_to_sheet(user_data[user_id])
-        reset_user(user_id)
-        await query.message.reply_text("✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
-        await query.message.reply_text("Contact us via WhatsApp: https://wa.me/7760225959")
+            del user_data[user_id]
+        await context.bot.send_message(chat_id=query.message.chat.id, text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
+        await context.bot.send_message(chat_id=query.message.chat.id, text="Contact us via WhatsApp: https://wa.me/7760225959")
         return
-    elif data == "No":
+    elif query.data == "No":
         reset_user(user_id)
-        await query.message.reply_text("Let's start over. Use /start to select a service again.")
+        await context.bot.send_message(chat_id=query.message.chat.id, text="Let's start over. Use /start to select a service again.")
         return
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -142,10 +140,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_id = message.from_user.id
     text = message.text.strip()
-    logger.info(f"User {user_id} sent message: {text}")
 
     if user_id not in user_data:
-        await message.reply_text("Please select a service first using /start")
+        if text in KNOWN_OPTIONS:
+            user_data[user_id] = {"step": 2, "Option": text, "Name": "", "Email": "", "Phone": "", "Query": ""}
+            await message.reply_text("Enter your Name:")
+        else:
+            await message.reply_text("Please choose a service using /start or type one of: " + ", ".join(KNOWN_OPTIONS))
         return
 
     step = user_data[user_id].get("step", 2)
@@ -183,7 +184,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                      InlineKeyboardButton("No", callback_data="No")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await message.reply_text(summary_text, reply_markup=reply_markup)
-        user_data[user_id]["step"] = 6  # awaiting confirmation
+        user_data[user_id]["step"] = 6  # final confirmation step
 
 # --------------------- REGISTER HANDLERS ---------------------
 application.add_handler(CommandHandler("start", start))
