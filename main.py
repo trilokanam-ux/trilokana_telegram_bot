@@ -20,7 +20,6 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import uvicorn
-import asyncio
 
 # --------------------- LOGGING ---------------------
 logging.basicConfig(
@@ -42,7 +41,6 @@ logging.info(f"SPREADSHEET_NAME: {SPREADSHEET_NAME}")
 creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
 if not creds_json:
     raise ValueError("GOOGLE_CREDENTIALS_JSON not set.")
-
 creds_dict = json.loads(creds_json)
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
@@ -55,7 +53,6 @@ app = FastAPI()
 # --------------------- TELEGRAM APPLICATION ---------------------
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN env var missing.")
-
 application = Application.builder().token(BOT_TOKEN).build()
 
 # --------------------- USER STATE ---------------------
@@ -71,7 +68,11 @@ def is_valid_phone(phone: str) -> bool:
     return phone.isdigit() and len(phone) >= 10
 
 # --------------------- HELPER ---------------------
-async def save_to_sheet(data):
+def reset_user(user_id):
+    if user_id in user_data:
+        user_data.pop(user_id)
+
+def save_to_sheet(data):
     try:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         row = [timestamp, data["Option"], data["Name"], data["Email"], data["Phone"], data["Query"]]
@@ -84,12 +85,12 @@ async def save_to_sheet(data):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
-            InlineKeyboardButton("Digital Marketing Strategy", callback_data="Digital Marketing Strategy"),
-            InlineKeyboardButton("Paid Marketing", callback_data="Paid Marketing"),
+            InlineKeyboardButton("Digital Marketing Strategy", callback_data="option_Digital Marketing Strategy"),
+            InlineKeyboardButton("Paid Marketing", callback_data="option_Paid Marketing"),
         ],
         [
-            InlineKeyboardButton("SEO", callback_data="SEO"),
-            InlineKeyboardButton("Creatives", callback_data="Creatives"),
+            InlineKeyboardButton("SEO", callback_data="option_SEO"),
+            InlineKeyboardButton("Creatives", callback_data="option_Creatives"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -106,43 +107,44 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
-        logger.warning("No callback query received!")
         return
 
     user_id = query.from_user.id
-    selected_option = query.data
-    logger.info(f"User {user_id} selected: {selected_option}")
+    data = query.data
 
-    # Answer callback to remove spinner
+    # Remove spinner
     await query.answer()
 
-    # Remove keyboard buttons
+    # Clear keyboard
     try:
         await query.message.edit_reply_markup(None)
-    except Exception as e:
-        logger.warning(f"Failed to remove buttons: {e}")
+    except Exception:
+        pass
 
-    # Confirmation buttons
-    if selected_option in ["Yes", "No"]:
-        if selected_option == "Yes":
-            data = user_data.get(user_id)
-            if data:
-                asyncio.create_task(save_to_sheet(data))
-            user_data.pop(user_id, None)
-            await context.bot.send_message(chat_id=query.message.chat_id,
-                                           text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
-            await context.bot.send_message(chat_id=query.message.chat_id,
-                                           text="Contact us via WhatsApp: https://wa.me/7760225959")
-        else:  # No
-            user_data.pop(user_id, None)
-            await context.bot.send_message(chat_id=query.message.chat_id,
-                                           text="Let's start over. Use /start to select a service again.")
+    # ---------------- Handle initial option selection ----------------
+    if data.startswith("option_"):
+        selected_option = data.replace("option_", "")
+        user_data[user_id] = {"step": 2, "Option": selected_option, "Name": "", "Email": "", "Phone": "", "Query": ""}
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text=f"You selected: {selected_option}\nEnter your Name:")
         return
 
-    # Normal option selection
-    user_data[user_id] = {"step": 2, "Option": selected_option, "Name": "", "Email": "", "Phone": "", "Query": ""}
-    await context.bot.send_message(chat_id=query.message.chat_id,
-                                   text=f"You selected: {selected_option}\nEnter your Name:")
+    # ---------------- Handle confirmation Yes/No ----------------
+    if data == "Yes":
+        user_info = user_data.get(user_id)
+        if user_info:
+            save_to_sheet(user_info)
+        reset_user(user_id)
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Contact us via WhatsApp: https://wa.me/7760225959")
+        return
+    elif data == "No":
+        reset_user(user_id)
+        await context.bot.send_message(chat_id=query.message.chat_id,
+                                       text="Let's start over. Use /start to select a service again.")
+        return
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -152,29 +154,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = message.text.strip()
 
     if user_id not in user_data:
-        if text in KNOWN_OPTIONS:
-            user_data[user_id] = {"step": 2, "Option": text, "Name": "", "Email": "", "Phone": "", "Query": ""}
-            await message.reply_text("Enter your Name:")
-            return
-        else:
-            await message.reply_text("Please choose a service using /start or type one of: " + ", ".join(KNOWN_OPTIONS))
-            return
+        await message.reply_text("Please select a service first using /start")
+        return
 
-    step = user_data[user_id].get("step", 2)
+    step = user_data[user_id]["step"]
     if step == 2:
         user_data[user_id]["Name"] = text
         user_data[user_id]["step"] = 3
         await message.reply_text("Enter your Email:")
     elif step == 3:
         if not is_valid_email(text):
-            await message.reply_text("Invalid email! Please enter a valid email address:")
+            await message.reply_text("Invalid email! Enter a valid email address:")
             return
         user_data[user_id]["Email"] = text
         user_data[user_id]["step"] = 4
         await message.reply_text("Enter your Phone Number:")
     elif step == 4:
         if not is_valid_phone(text):
-            await message.reply_text("Invalid phone number! Please enter a valid phone number (digits only, min 10 digits):")
+            await message.reply_text("Invalid phone number! Enter digits only (min 10 digits):")
             return
         user_data[user_id]["Phone"] = text
         user_data[user_id]["step"] = 5
