@@ -33,9 +33,9 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 SPREADSHEET_NAME = os.environ.get("SPREADSHEET_NAME", "Trilokana_Marketing_Bot_Data")
 
-logger.info(f"BOT_TOKEN set? {BOT_TOKEN is not None}")
-logger.info(f"WEBHOOK_URL set? {WEBHOOK_URL is not None}")
-logger.info(f"SPREADSHEET_NAME: {SPREADSHEET_NAME}")
+logging.info(f"BOT_TOKEN set? {BOT_TOKEN is not None}")
+logging.info(f"WEBHOOK_URL set? {WEBHOOK_URL is not None}")
+logging.info(f"SPREADSHEET_NAME: {SPREADSHEET_NAME}")
 
 # --------------------- GOOGLE SHEETS ---------------------
 creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
@@ -71,7 +71,6 @@ def is_valid_phone(phone: str) -> bool:
 def reset_user(user_id):
     if user_id in user_data:
         user_data.pop(user_id)
-        logger.info(f"Reset data for user {user_id}")
 
 def save_to_sheet(data):
     try:
@@ -100,6 +99,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Visit our website: https://trilokana.com\n\n"
         "What are you looking for?"
     )
+    logger.info(f"/start called by user {update.effective_user.id}")
     if update.message:
         await update.message.reply_text(welcome_text, reply_markup=reply_markup)
     elif update.effective_chat:
@@ -108,16 +108,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
+        logger.warning("No callback query!")
         return
 
     user_id = query.from_user.id
     data = query.data
-    logger.info(f"User {user_id} pressed button: {data}")
+    chat_id = query.message.chat.id if query.message else user_id
 
-    await query.answer()  # remove spinner
+    logger.info(f"Callback received from user {user_id}: {data}")
 
+    # Remove spinner
+    await query.answer()
+
+    # Clear keyboard if possible
     try:
-        await query.message.edit_reply_markup(None)
+        if query.message:
+            await query.message.edit_reply_markup(None)
     except Exception:
         pass
 
@@ -125,7 +131,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("option_"):
         selected_option = data.replace("option_", "")
         user_data[user_id] = {"step": 2, "Option": selected_option, "Name": "", "Email": "", "Phone": "", "Query": ""}
-        await context.bot.send_message(chat_id=query.message.chat.id,
+        await context.bot.send_message(chat_id=chat_id,
                                        text=f"You selected: {selected_option}\nEnter your Name:")
         return
 
@@ -135,14 +141,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_info:
             save_to_sheet(user_info)
         reset_user(user_id)
-        await context.bot.send_message(chat_id=query.message.chat.id,
+        await context.bot.send_message(chat_id=chat_id,
                                        text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
-        await context.bot.send_message(chat_id=query.message.chat.id,
+        await context.bot.send_message(chat_id=chat_id,
                                        text="Contact us via WhatsApp: https://wa.me/7760225959")
         return
     elif data == "No":
         reset_user(user_id)
-        await context.bot.send_message(chat_id=query.message.chat.id,
+        await context.bot.send_message(chat_id=chat_id,
                                        text="Let's start over. Use /start to select a service again.")
         return
 
@@ -151,15 +157,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message or not message.text:
         return
     user_id = message.from_user.id
+    chat_id = message.chat_id
     text = message.text.strip()
+    logger.info(f"Message from user {user_id}: {text}")
 
     if user_id not in user_data:
         await message.reply_text("Please select a service first using /start")
         return
 
     step = user_data[user_id]["step"]
-    logger.info(f"User {user_id} at step {step}, message: {text}")
-
     if step == 2:
         user_data[user_id]["Name"] = text
         user_data[user_id]["step"] = 3
