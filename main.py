@@ -16,11 +16,10 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-import gspread_asyncio
+import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import uvicorn
-import asyncio
 
 # --------------------- LOGGING ---------------------
 logging.basicConfig(
@@ -38,29 +37,15 @@ logging.info(f"BOT_TOKEN set? {BOT_TOKEN is not None}")
 logging.info(f"WEBHOOK_URL set? {WEBHOOK_URL is not None}")
 logging.info(f"SPREADSHEET_NAME: {SPREADSHEET_NAME}")
 
-# --------------------- GOOGLE SHEETS (ASYNC) ---------------------
+# --------------------- GOOGLE SHEETS ---------------------
 creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
 if not creds_json:
     raise ValueError("GOOGLE_CREDENTIALS_JSON not set.")
 creds_dict = json.loads(creds_json)
-
-def get_creds():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    return ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-
-agcm = gspread_asyncio.AsyncioGspreadClientManager(get_creds)
-
-async def save_to_sheet(data):
-    try:
-        agc = await agcm.authorize()
-        sheet = await agc.open(SPREADSHEET_NAME)
-        worksheet = await sheet.get_worksheet(0)
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        row = [timestamp, data["Option"], data["Name"], data["Email"], data["Phone"], data["Query"]]
-        await worksheet.append_row(row)
-        logger.info("Data saved to Google Sheet successfully")
-    except Exception as e:
-        logger.exception("Error saving to Google Sheet: %s", e)
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+client = gspread.authorize(creds)
+sheet = client.open(SPREADSHEET_NAME).sheet1
 
 # --------------------- FASTAPI ---------------------
 app = FastAPI()
@@ -81,6 +66,17 @@ def is_valid_email(email: str) -> bool:
 
 def is_valid_phone(phone: str) -> bool:
     return phone.isdigit() and len(phone) >= 10
+
+# --------------------- HELPER ---------------------
+def save_to_sheet(data):
+    """Save user data to Google Sheet"""
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        row = [timestamp, data["Option"], data["Name"], data["Email"], data["Phone"], data["Query"]]
+        sheet.append_row(row)
+        logger.info("Data saved to Google Sheet successfully")
+    except Exception as e:
+        logger.exception("Error saving to Google Sheet: %s", e)
 
 # --------------------- HANDLERS ---------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -112,7 +108,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     selected_option = query.data
 
-    # Immediately answer callback to remove spinner
+    # Answer callback to remove spinner
     await query.answer(text="Processing...", show_alert=False)
 
     # Clear keyboard
@@ -125,7 +121,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if selected_option == "Yes":
         data = user_data.get(user_id)
         if data:
-            asyncio.create_task(save_to_sheet(data))
+            save_to_sheet(data)
         user_data.pop(user_id, None)
         await context.bot.send_message(chat_id=query.message.chat_id,
                                        text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
