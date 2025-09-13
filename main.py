@@ -59,7 +59,7 @@ application = Application.builder().token(BOT_TOKEN).build()
 user_data = {}
 KNOWN_OPTIONS = ["Digital Marketing Strategy", "Paid Marketing", "SEO", "Creatives"]
 
-# --------------------- VALIDATION ---------------------
+# --------------------- VALIDATION FUNCTIONS ---------------------
 def is_valid_email(email: str) -> bool:
     pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
     return re.match(pattern, email) is not None
@@ -69,7 +69,7 @@ def is_valid_phone(phone: str) -> bool:
 
 def reset_user(user_id):
     if user_id in user_data:
-        user_data.pop(user_id)
+        del user_data[user_id]
 
 def save_to_sheet(data):
     try:
@@ -107,40 +107,37 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
         return
-    await query.answer()  # remove spinner
+
     user_id = query.from_user.id
+    await query.answer()  # remove spinner
+
     data = query.data
 
-    # Handle option selection
+    # ---------------- Handle initial option selection ----------------
     if data.startswith("option_"):
         selected_option = data.replace("option_", "")
         user_data[user_id] = {"step": 2, "Option": selected_option, "Name": "", "Email": "", "Phone": "", "Query": ""}
         try:
-            await query.message.edit_reply_markup(None)
+            await query.message.edit_reply_markup(None)  # remove keyboard
         except Exception:
             pass
         await query.message.reply_text(f"You selected: {selected_option}\nEnter your Name:")
         return
 
-    # Handle confirmation
-    if data.startswith("confirm_"):
-        choice = data.replace("confirm_", "")
-        if choice == "Yes":
-            if user_id in user_data:
-                save_to_sheet(user_data[user_id])
-                reset_user(user_id)
-            await context.bot.send_message(chat_id=query.message.chat.id,
-                                           text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
-            await context.bot.send_message(chat_id=query.message.chat.id,
-                                           text="Contact us via WhatsApp: https://wa.me/7760225959")
-        else:  # No
-            reset_user(user_id)
-            await context.bot.send_message(chat_id=query.message.chat.id,
-                                           text="Let's start over. Use /start to select a service again.")
-        try:
-            await query.message.edit_reply_markup(None)
-        except Exception:
-            pass
+    # ---------------- Handle confirmation Yes/No ----------------
+    if data == "Yes":
+        if user_id in user_data:
+            save_to_sheet(user_data[user_id])
+        reset_user(user_id)
+        await context.bot.send_message(chat_id=query.message.chat.id,
+                                       text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
+        await context.bot.send_message(chat_id=query.message.chat.id,
+                                       text="Contact us via WhatsApp: https://wa.me/7760225959")
+        return
+    elif data == "No":
+        reset_user(user_id)
+        await context.bot.send_message(chat_id=query.message.chat.id,
+                                       text="Let's start over. Use /start to select a service again.")
         return
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -155,6 +152,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     step = user_data[user_id]["step"]
+
     if step == 2:
         user_data[user_id]["Name"] = text
         user_data[user_id]["step"] = 3
@@ -175,19 +173,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text("Enter your Query:")
     elif step == 5:
         user_data[user_id]["Query"] = text
-        data_summary = user_data[user_id]
+        data = user_data[user_id]
         summary_text = (
             f"Please confirm your details:\n\n"
-            f"Service: {data_summary['Option']}\n"
-            f"Name: {data_summary['Name']}\n"
-            f"Email: {data_summary['Email']}\n"
-            f"Phone: {data_summary['Phone']}\n"
-            f"Query: {data_summary['Query']}\n"
+            f"Service: {data['Option']}\n"
+            f"Name: {data['Name']}\n"
+            f"Email: {data['Email']}\n"
+            f"Phone: {data['Phone']}\n"
+            f"Query: {data['Query']}\n"
         )
-        keyboard = [
-            [InlineKeyboardButton("Yes", callback_data="confirm_Yes"),
-             InlineKeyboardButton("No", callback_data="confirm_No")]
-        ]
+        keyboard = [[InlineKeyboardButton("Yes", callback_data="Yes"),
+                     InlineKeyboardButton("No", callback_data="No")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await message.reply_text(summary_text, reply_markup=reply_markup)
 
@@ -204,6 +200,7 @@ class TelegramUpdate(BaseModel):
 @app.post("/webhook")
 async def telegram_webhook(update: TelegramUpdate, request: Request):
     update_dict = update.dict()
+    logger.info(f"Incoming update: {update_dict.get('update_id')}")
     telegram_update = Update.de_json(update_dict, application.bot)
     await application.process_update(telegram_update)
     return {"ok": True}
@@ -220,6 +217,8 @@ async def startup():
     if WEBHOOK_URL:
         await application.bot.set_webhook(WEBHOOK_URL)
         logger.info(f"Webhook set to {WEBHOOK_URL}")
+    else:
+        logger.warning("WEBHOOK_URL not set.")
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -230,3 +229,4 @@ async def shutdown():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+
