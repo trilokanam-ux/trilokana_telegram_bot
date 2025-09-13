@@ -199,7 +199,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         user_data[user_id]["Email"] = text
         user_data[user_id]["step"] = 4
-        await message.reply_text("Enter your Phone Number (digits, min 7):")
+        await message.reply_text("Enter your Phone Number (digits, min 10):")
         return
 
     # 4 -> Phone
