@@ -41,9 +41,7 @@ creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
 if not creds_json:
     raise ValueError("Environment variable GOOGLE_CREDENTIALS_JSON not set. Paste service account JSON as string.")
 
-# Convert JSON string from env into dictionary
 creds_dict = json.loads(creds_json)
-
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
@@ -57,10 +55,9 @@ if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN env var missing.")
 application = Application.builder().token(BOT_TOKEN).build()
 
-# Simple in-memory user state (for demo). For production consider persistent storage.
+# Simple in-memory user state
 user_data = {}
 
-# Known options (keeps backwards compatibility if user types the option manually)
 KNOWN_OPTIONS = ["Digital Marketing Strategy", "Paid Marketing", "SEO", "Creatives"]
 
 # --------------------- HANDLERS ---------------------
@@ -81,7 +78,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Visit our website: https://trilokana.com\n\n"
         "What are you looking for?"
     )
-    # If started via callback/chat, message may be in update.message
     if update.message:
         await update.message.reply_text(welcome_text, reply_markup=reply_markup)
     elif update.effective_chat:
@@ -91,18 +87,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
         return
-    await query.answer()  # acknowledge the callback to remove loading spinner on client
+
+    # ✅ Acknowledge the callback so spinner disappears
+    await query.answer()
+
     selected_option = query.data
     user_id = query.from_user.id
 
-    # Save user state and advance to step 2 (Name)
-    user_data[user_id] = {"step": 2, "Option": selected_option, "Name": "", "Email": "", "Phone": "", "Query": ""}
+    user_data[user_id] = {
+        "step": 2,
+        "Option": selected_option,
+        "Name": "",
+        "Email": "",
+        "Phone": "",
+        "Query": ""
+    }
 
-    # Optionally remove inline keyboard so user can't re-click
     try:
         await query.message.edit_reply_markup(reply_markup=None)
     except Exception:
-        # ignore edit errors (message might be too old or permissions)
         pass
 
     await query.message.reply_text(f"You selected: {selected_option}\nEnter your Name:")
@@ -114,15 +117,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = message.from_user.id
     text = message.text.strip()
 
-    # Backwards compatibility: if user typed the option (or used old ReplyKeyboardMarkup),
-    # accept it as the first step.
     if user_id not in user_data:
         if text in KNOWN_OPTIONS:
             user_data[user_id] = {"step": 2, "Option": text, "Name": "", "Email": "", "Phone": "", "Query": ""}
             await message.reply_text("Enter your Name:")
             return
         else:
-            # Prompt user to use /start (which will show inline buttons)
             await message.reply_text("Please choose a service using /start or type one of: " + ", ".join(KNOWN_OPTIONS))
             return
 
@@ -158,7 +158,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.exception("Error appending to Google Sheet: %s", e)
             await message.reply_text("Sorry, there was an error saving your data. Please try again later.")
-        # Clean up state
         if user_id in user_data:
             del user_data[user_id]
 
