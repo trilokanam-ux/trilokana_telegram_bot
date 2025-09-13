@@ -4,6 +4,7 @@ load_dotenv()
 import os
 import json
 import logging
+import re
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 # --------------------- CONFIG / ENV ---------------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # e.g. https://<your-railway-domain>/webhook
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 SPREADSHEET_NAME = os.environ.get("SPREADSHEET_NAME", "Trilokana_Marketing_Bot_Data")
 
 logging.info(f"BOT_TOKEN set? {BOT_TOKEN is not None}")
@@ -39,8 +40,7 @@ logging.info(f"SPREADSHEET_NAME: {SPREADSHEET_NAME}")
 # --------------------- GOOGLE SHEETS ---------------------
 creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
 if not creds_json:
-    raise ValueError("Environment variable GOOGLE_CREDENTIALS_JSON not set. Paste service account JSON as string.")
-
+    raise ValueError("GOOGLE_CREDENTIALS_JSON not set.")
 creds_dict = json.loads(creds_json)
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
@@ -55,10 +55,17 @@ if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN env var missing.")
 application = Application.builder().token(BOT_TOKEN).build()
 
-# Simple in-memory user state
+# --------------------- USER STATE ---------------------
 user_data = {}
-
 KNOWN_OPTIONS = ["Digital Marketing Strategy", "Paid Marketing", "SEO", "Creatives"]
+
+# --------------------- VALIDATION FUNCTIONS ---------------------
+def is_valid_email(email: str) -> bool:
+    pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
+    return re.match(pattern, email) is not None
+
+def is_valid_phone(phone: str) -> bool:
+    return phone.isdigit() and len(phone) >= 10
 
 # --------------------- HANDLERS ---------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -87,33 +94,50 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
         return
-
-    # ✅ Acknowledge the callback so spinner disappears
     await query.answer()
-
-    selected_option = query.data
     user_id = query.from_user.id
+    selected_option = query.data
 
-    user_data[user_id] = {
-        "step": 2,
-        "Option": selected_option,
-        "Name": "",
-        "Email": "",
-        "Phone": "",
-        "Query": ""
-    }
+    # If this is a confirmation step
+    if selected_option == "Yes":
+        data = user_data.get(user_id)
+        if data:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            row = [
+                timestamp,
+                data["Option"],
+                data["Name"],
+                data["Email"],
+                data["Phone"],
+                data["Query"],
+            ]
+            try:
+                sheet.append_row(row)
+                await query.message.reply_text("Thank you! Your details have been recorded. We will contact you soon.")
+                await query.message.reply_text("Contact us via WhatsApp: https://wa.me/7760225959")
+            except Exception as e:
+                logger.exception("Error appending to Google Sheet: %s", e)
+                await query.message.reply_text("Sorry, there was an error saving your data. Please try again later.")
+        if user_id in user_data:
+            del user_data[user_id]
+        await query.message.edit_reply_markup(None)
+        return
 
-    # Try to remove inline buttons (but don’t fail if it errors)
+    elif selected_option == "No":
+        # Restart the flow
+        if user_id in user_data:
+            del user_data[user_id]
+        await query.message.reply_text("Let's start over. Use /start to select a service again.")
+        await query.message.edit_reply_markup(None)
+        return
+
+    # Normal option selection
+    user_data[user_id] = {"step": 2, "Option": selected_option, "Name": "", "Email": "", "Phone": "", "Query": ""}
     try:
         await query.message.edit_reply_markup(reply_markup=None)
-    except Exception as e:
-        logger.warning(f"Could not edit message markup: {e}")
-
-    # ✅ Always send a new message (safer than reply_text here)
-    await context.bot.send_message(
-        chat_id=query.message.chat.id,
-        text=f"You selected: {selected_option}\nEnter your Name:"
-    )
+    except Exception:
+        pass
+    await query.message.reply_text(f"You selected: {selected_option}\nEnter your Name:")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -138,49 +162,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data[user_id]["step"] = 3
         await message.reply_text("Enter your Email:")
     elif step == 3:
+        if not is_valid_email(text):
+            await message.reply_text("Invalid email! Please enter a valid email address:")
+            return
         user_data[user_id]["Email"] = text
         user_data[user_id]["step"] = 4
         await message.reply_text("Enter your Phone Number:")
     elif step == 4:
+        if not is_valid_phone(text):
+            await message.reply_text("Invalid phone number! Please enter a valid phone number (digits only, min 10 digits):")
+            return
         user_data[user_id]["Phone"] = text
         user_data[user_id]["step"] = 5
         await message.reply_text("Enter your Query:")
     elif step == 5:
         user_data[user_id]["Query"] = text
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        row = [
-            timestamp,
-            user_data[user_id]["Option"],
-            user_data[user_id]["Name"],
-            user_data[user_id]["Email"],
-            user_data[user_id]["Phone"],
-            user_data[user_id]["Query"],
+
+        # Show summary for confirmation
+        data = user_data[user_id]
+        summary_text = (
+            f"Please confirm your details:\n\n"
+            f"Service: {data['Option']}\n"
+            f"Name: {data['Name']}\n"
+            f"Email: {data['Email']}\n"
+            f"Phone: {data['Phone']}\n"
+            f"Query: {data['Query']}\n"
+        )
+        keyboard = [
+            [InlineKeyboardButton("Yes", callback_data="Yes"), InlineKeyboardButton("No", callback_data="No")]
         ]
-        try:
-            sheet.append_row(row)
-            await message.reply_text("Thank you! Your details have been recorded. We will contact you soon.")
-            await message.reply_text("Contact us via WhatsApp: https://wa.me/7760225959")
-        except Exception as e:
-            logger.exception("Error appending to Google Sheet: %s", e)
-            await message.reply_text("Sorry, there was an error saving your data. Please try again later.")
-        if user_id in user_data:
-            del user_data[user_id]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await message.reply_text(summary_text, reply_markup=reply_markup)
 
 # --------------------- REGISTER HANDLERS ---------------------
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# --------------------- WEBHOOK ROUTE ---------------------
+# --------------------- WEBHOOK ---------------------
 class TelegramUpdate(BaseModel):
     update_id: int
     message: dict = None
-    callback_query: dict = None  # ✅ Add this so InlineKeyboard updates parse correctly
 
 @app.post("/webhook")
 async def telegram_webhook(update: TelegramUpdate, request: Request):
     update_dict = update.dict()
-    logger.info(f"Incoming update: {update_dict.get('update_id')}")
     telegram_update = Update.de_json(update_dict, application.bot)
     await application.process_update(telegram_update)
     return {"ok": True}
@@ -192,17 +218,13 @@ async def root():
 # --------------------- STARTUP & SHUTDOWN ---------------------
 @app.on_event("startup")
 async def startup():
-    logger.info("Initializing Telegram application...")
     await application.initialize()
     if WEBHOOK_URL:
         await application.bot.set_webhook(WEBHOOK_URL)
         logger.info(f"Webhook set to {WEBHOOK_URL}")
-    else:
-        logger.warning("WEBHOOK_URL is not set. Webhook will not be configured.")
 
 @app.on_event("shutdown")
 async def shutdown():
-    logger.info("Shutting down Telegram application...")
     await application.shutdown()
 
 # --------------------- RUN ---------------------
