@@ -20,7 +20,6 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import uvicorn
-from contextlib import asynccontextmanager
 
 # --------------------- LOGGING ---------------------
 logging.basicConfig(
@@ -49,20 +48,7 @@ client = gspread.authorize(creds)
 sheet = client.open(SPREADSHEET_NAME).sheet1
 
 # --------------------- FASTAPI ---------------------
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Initialize Telegram app
-    await application.initialize()
-    if WEBHOOK_URL:
-        await application.bot.set_webhook(WEBHOOK_URL)
-        logger.info(f"Webhook set to {WEBHOOK_URL}")
-    else:
-        logger.warning("WEBHOOK_URL not set.")
-    yield
-    # Shutdown
-    await application.shutdown()
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 # --------------------- TELEGRAM APPLICATION ---------------------
 if not BOT_TOKEN:
@@ -122,10 +108,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query:
         return
     await query.answer()  # remove spinner
-    data = query.data
     user_id = query.from_user.id
+    data = query.data
 
-    # ---------------- Handle initial option selection ----------------
+    # Handle option selection
     if data.startswith("option_"):
         selected_option = data.replace("option_", "")
         user_data[user_id] = {"step": 2, "Option": selected_option, "Name": "", "Email": "", "Phone": "", "Query": ""}
@@ -133,25 +119,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.edit_reply_markup(None)
         except Exception:
             pass
-        await context.bot.send_message(chat_id=query.message.chat.id,
-                                       text=f"You selected: {selected_option}\nEnter your Name:")
+        await query.message.reply_text(f"You selected: {selected_option}\nEnter your Name:")
         return
 
-    # ---------------- Handle confirmation Yes/No ----------------
-    if data == "Yes":
-        user_info = user_data.get(user_id)
-        if user_info:
-            save_to_sheet(user_info)
-        reset_user(user_id)
-        await context.bot.send_message(chat_id=query.message.chat.id,
-                                       text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
-        await context.bot.send_message(chat_id=query.message.chat.id,
-                                       text="Contact us via WhatsApp: https://wa.me/7760225959")
-        return
-    elif data == "No":
-        reset_user(user_id)
-        await context.bot.send_message(chat_id=query.message.chat.id,
-                                       text="Let's start over. Use /start to select a service again.")
+    # Handle confirmation
+    if data.startswith("confirm_"):
+        choice = data.replace("confirm_", "")
+        if choice == "Yes":
+            if user_id in user_data:
+                save_to_sheet(user_data[user_id])
+                reset_user(user_id)
+            await context.bot.send_message(chat_id=query.message.chat.id,
+                                           text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
+            await context.bot.send_message(chat_id=query.message.chat.id,
+                                           text="Contact us via WhatsApp: https://wa.me/7760225959")
+        else:  # No
+            reset_user(user_id)
+            await context.bot.send_message(chat_id=query.message.chat.id,
+                                           text="Let's start over. Use /start to select a service again.")
+        try:
+            await query.message.edit_reply_markup(None)
+        except Exception:
+            pass
         return
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -186,17 +175,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text("Enter your Query:")
     elif step == 5:
         user_data[user_id]["Query"] = text
-        data = user_data[user_id]
+        data_summary = user_data[user_id]
         summary_text = (
             f"Please confirm your details:\n\n"
-            f"Service: {data['Option']}\n"
-            f"Name: {data['Name']}\n"
-            f"Email: {data['Email']}\n"
-            f"Phone: {data['Phone']}\n"
-            f"Query: {data['Query']}\n"
+            f"Service: {data_summary['Option']}\n"
+            f"Name: {data_summary['Name']}\n"
+            f"Email: {data_summary['Email']}\n"
+            f"Phone: {data_summary['Phone']}\n"
+            f"Query: {data_summary['Query']}\n"
         )
-        keyboard = [[InlineKeyboardButton("Yes", callback_data="Yes"),
-                     InlineKeyboardButton("No", callback_data="No")]]
+        keyboard = [
+            [InlineKeyboardButton("Yes", callback_data="confirm_Yes"),
+             InlineKeyboardButton("No", callback_data="confirm_No")]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await message.reply_text(summary_text, reply_markup=reply_markup)
 
@@ -220,6 +211,20 @@ async def telegram_webhook(update: TelegramUpdate, request: Request):
 @app.get("/")
 async def root():
     return {"message": "Trilokana Telegram Bot is running!"}
+
+# --------------------- STARTUP & SHUTDOWN ---------------------
+@app.on_event("startup")
+async def startup():
+    logger.info("Initializing Telegram application...")
+    await application.initialize()
+    if WEBHOOK_URL:
+        await application.bot.set_webhook(WEBHOOK_URL)
+        logger.info(f"Webhook set to {WEBHOOK_URL}")
+
+@app.on_event("shutdown")
+async def shutdown():
+    logger.info("Shutting down Telegram application...")
+    await application.shutdown()
 
 # --------------------- RUN ---------------------
 if __name__ == "__main__":
