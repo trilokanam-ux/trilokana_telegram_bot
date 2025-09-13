@@ -125,7 +125,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("option_"):
         selected_option = data.replace("option_", "")
         user_data[user_id] = {"step": 2, "Option": selected_option, "Name": "", "Email": "", "Phone": "", "Query": ""}
-        await context.bot.send_message(chat_id=query.message.chat_id,
+        await context.bot.send_message(chat_id=query.message.chat.id,
                                        text=f"You selected: {selected_option}\nEnter your Name:")
         return
 
@@ -135,14 +135,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_info:
             save_to_sheet(user_info)
         reset_user(user_id)
-        await context.bot.send_message(chat_id=query.message.chat_id,
+        await context.bot.send_message(chat_id=query.message.chat.id,
                                        text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
-        await context.bot.send_message(chat_id=query.message.chat_id,
+        await context.bot.send_message(chat_id=query.message.chat.id,
                                        text="Contact us via WhatsApp: https://wa.me/7760225959")
         return
     elif data == "No":
         reset_user(user_id)
-        await context.bot.send_message(chat_id=query.message.chat_id,
+        await context.bot.send_message(chat_id=query.message.chat.id,
                                        text="Let's start over. Use /start to select a service again.")
         return
 
