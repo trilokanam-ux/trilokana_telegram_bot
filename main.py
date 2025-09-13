@@ -103,12 +103,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Query": ""
     }
 
+    # Try to remove inline buttons (but don’t fail if it errors)
     try:
         await query.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Could not edit message markup: {e}")
 
-    await query.message.reply_text(f"You selected: {selected_option}\nEnter your Name:")
+    # ✅ Always send a new message (safer than reply_text here)
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text=f"You selected: {selected_option}\nEnter your Name:"
+    )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -170,6 +175,7 @@ application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_m
 class TelegramUpdate(BaseModel):
     update_id: int
     message: dict = None
+    callback_query: dict = None  # ✅ Add this so InlineKeyboard updates parse correctly
 
 @app.post("/webhook")
 async def telegram_webhook(update: TelegramUpdate, request: Request):
