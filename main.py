@@ -59,7 +59,7 @@ application = Application.builder().token(BOT_TOKEN).build()
 user_data = {}
 KNOWN_OPTIONS = ["Digital Marketing Strategy", "Paid Marketing", "SEO", "Creatives"]
 
-# --------------------- VALIDATION FUNCTIONS ---------------------
+# --------------------- VALIDATION ---------------------
 def is_valid_email(email: str) -> bool:
     pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
     return re.match(pattern, email) is not None
@@ -67,7 +67,7 @@ def is_valid_email(email: str) -> bool:
 def is_valid_phone(phone: str) -> bool:
     return phone.isdigit() and len(phone) >= 10
 
-# --------------------- HELPERS ---------------------
+# --------------------- HELPER ---------------------
 def reset_user(user_id):
     if user_id in user_data:
         user_data.pop(user_id)
@@ -108,23 +108,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
         return
+    await query.answer()  # remove spinner
     user_id = query.from_user.id
     data = query.data
-
-    # ✅ Answer callback immediately to remove spinner
-    await query.answer()
-
     logger.info(f"Callback received from user {user_id}: {data}")
 
-    # ---------------- Handle option selection ----------------
+    # ---------------- Handle initial option selection ----------------
     if data.startswith("option_"):
         selected_option = data.replace("option_", "")
         user_data[user_id] = {"step": 2, "Option": selected_option, "Name": "", "Email": "", "Phone": "", "Query": ""}
-        try:
-            await query.message.edit_reply_markup(None)  # Remove buttons
-        except Exception as e:
-            logger.warning(f"Failed to remove buttons: {e}")
-        await query.message.reply_text(f"You selected: {selected_option}\nEnter your Name:")
+        await context.bot.send_message(chat_id=query.message.chat.id,
+                                       text=f"You selected: {selected_option}\nEnter your Name:")
         return
 
     # ---------------- Handle Yes/No confirmation ----------------
@@ -133,13 +127,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_info:
             save_to_sheet(user_info)
         reset_user(user_id)
-        await query.message.reply_text("✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
-        await query.message.reply_text("Contact us via WhatsApp: https://wa.me/7760225959")
+        await context.bot.send_message(chat_id=query.message.chat.id,
+                                       text="✅ Thank you! Your details have been recorded.\nWe will contact you soon.")
+        await context.bot.send_message(chat_id=query.message.chat.id,
+                                       text="Contact us via WhatsApp: https://wa.me/7760225959")
     elif data == "No":
         reset_user(user_id)
-        await query.message.reply_text("Let's start over. Use /start to select a service again.")
-    else:
-        logger.warning(f"Unknown callback data from user {user_id}: {data}")
+        await context.bot.send_message(chat_id=query.message.chat.id,
+                                       text="Let's start over. Use /start to select a service again.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -149,22 +144,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = message.text.strip()
 
     if user_id not in user_data:
-        if text in KNOWN_OPTIONS:
-            user_data[user_id] = {"step": 2, "Option": text, "Name": "", "Email": "", "Phone": "", "Query": ""}
-            await message.reply_text("Enter your Name:")
-            return
-        else:
-            await message.reply_text("Please choose a service using /start or type one of: " + ", ".join(KNOWN_OPTIONS))
-            return
+        await message.reply_text("Please select a service first using /start")
+        return
 
-    step = user_data[user_id].get("step", 2)
+    step = user_data[user_id]["step"]
     if step == 2:
         user_data[user_id]["Name"] = text
         user_data[user_id]["step"] = 3
         await message.reply_text("Enter your Email:")
     elif step == 3:
         if not is_valid_email(text):
-            await message.reply_text("Invalid email! Please enter a valid email address:")
+            await message.reply_text("Invalid email! Enter a valid email address:")
             return
         user_data[user_id]["Email"] = text
         user_data[user_id]["step"] = 4
@@ -190,7 +180,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("Yes", callback_data="Yes"),
                      InlineKeyboardButton("No", callback_data="No")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await message.reply_text(summary_text, reply_markup=reply_markup)
+        await context.bot.send_message(chat_id=message.chat.id, text=summary_text, reply_markup=reply_markup)
 
 # --------------------- REGISTER HANDLERS ---------------------
 application.add_handler(CommandHandler("start", start))
